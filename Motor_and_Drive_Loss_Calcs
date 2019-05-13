@@ -1,1 +1,130 @@
 
+
+%Calculate motor torque (assumes mechanical brakes aren't used)
+
+%*************************************************************************%
+%Calculate Losses for g1 and g2
+%*************************************************************************%
+%Declare motor and drive loss tables
+Mot_and_Drive_Loss_Tables_R1
+
+%Calculate motor losses
+P_model_loss_motor_g1 = interp2(Torque_points,RPM_points,Mot_loss_data,abs(T_dev_g1),RPM_motor_g1,'spline',max(max(Mot_loss_data)));
+P_model_loss_motor_g2 = interp2(Torque_points,RPM_points,Mot_loss_data,abs(T_dev_g2),RPM_motor_g2,'spline',max(max(Mot_loss_data)));
+
+%Calculate drive losses
+P_model_loss_drive_g1 = interp2(Torque_points,RPM_points,Drive_semiconductor_loss_data,abs(T_dev_g1),RPM_motor_g1,'spline',max(max(Drive_semiconductor_loss_data)));
+P_model_loss_drive_g2 = interp2(Torque_points,RPM_points,Drive_semiconductor_loss_data,abs(T_dev_g2),RPM_motor_g2,'spline',max(max(Drive_semiconductor_loss_data)));
+
+%Sum motor and drive losses
+P_model_loss_motor_and_drive_g1 = P_model_loss_motor_g1 + P_model_loss_drive_g1;
+P_model_loss_motor_and_drive_g2 = P_model_loss_motor_g2 + P_model_loss_drive_g2;
+%*************************************************************************%
+
+%*************************************************************************%
+%Choose gear 1, 2, or optimum gear
+%*************************************************************************%
+
+%gear_selection_option='minimum_loss_gear';%'gear_2_only';
+
+switch gear_selection_option
+    case 'gear_1_only'
+        Gear=0;    
+    case 'gear_2_only'
+        Gear=1;
+    case 'minimum_loss_gear'
+        %Set losses to high value if torque or power out of range, forces correct
+        %gear choice
+        Out_of_range_g2=(abs(T_dev_g2)>460*Number_of_Motors);
+        Out_of_range_g1=(RPM_motor_g1>7000);
+        P_model_loss_motor_and_drive_g2=P_model_loss_motor_and_drive_g2+Out_of_range_g2*10^4;
+        P_model_loss_motor_and_drive_g1=P_model_loss_motor_and_drive_g1+Out_of_range_g1*10^4;
+        %Calculate gear for minimized losses
+        Gear=(P_model_loss_motor_and_drive_g1>P_model_loss_motor_and_drive_g2);
+end
+
+%Calculate losses and torque for gear choice
+Torque=(1-Gear).*T_dev_g1+Gear.*T_dev_g2;
+RPM_motor=(1-Gear).*RPM_motor_g1+Gear.*RPM_motor_g2;
+
+P_model_loss_motor=(1-Gear).*P_model_loss_motor_g1+Gear.*P_model_loss_motor_g2;
+P_model_loss_drive=(1-Gear).*P_model_loss_drive_g1+Gear.*P_model_loss_drive_g2;
+
+P_model_loss_motor_and_drive=(1-Gear).*P_model_loss_motor_and_drive_g1+Gear.*P_model_loss_motor_and_drive_g2;
+P_mot_out=(1-Gear).*P_mot_out_g1+Gear.*P_mot_out_g2;
+
+%Calculate motor input and motor controller input power
+P_mot=P_mot_out+P_model_loss_motor;
+P_mc_in=P_mot+P_model_loss_drive;
+%*************************************************************************%
+
+%Calculate battery output power
+P_batt_out=P_mc_in+P_acc;
+%Apply battery power limits to battery power command
+P_batt_out=(P_batt_out>P_lim).*P_lim+(P_batt_out<-P_lim).*-P_lim+(P_batt_out>=-P_lim).*(P_batt_out<=P_lim).*P_batt_out;
+
+%Allow Battery Power to be overwritten for custom power profile
+if Custom_Power_Profile==true
+    P_batt_out=interp1(1:length(P_custom),P_custom,1:delta_T:length(P_custom))';
+end
+
+
+%*************************************************************************%
+% %Simplified calcs - constant efficiency - normally commented out
+% 
+% %Calculate motor electrical input power
+% P_mot=((P_mot_out<0).*P_mot_out*n_mot_avg+...
+%     (P_mot_out>=0).*P_mot_out/n_mot_avg);
+% 
+% %Calculate motor controller input power
+% P_mc_in=((P_mot_out<0).*P_mot*n_mc_avg+...
+%     (P_mot_out>=0).*P_mot/n_mc_avg);
+%*************************************************************************%
+
+%*************************************************************************%
+%Calculate motor and drive efficiency and losses
+%*************************************************************************%
+
+Battery_Pack_Calcs_R2
+
+%Motoring Case%
+%*************************************************************************%
+%Motor losses and efficiency while motoring
+E_kWh_motor_losses_mot=sum((Torque>0).*P_model_loss_motor)*delta_T/3600/1000;
+E_kWh_motor_mech_mot=sum((Torque>0).*P_mot_out)*delta_T/3600/1000;
+n_motor_mot=E_kWh_motor_mech_mot/(E_kWh_motor_mech_mot+E_kWh_motor_losses_mot);
+
+%Drive losses and efficiency while motoring
+E_kWh_drive_losses_mot=sum((Torque>0).*P_model_loss_drive)*delta_T/3600/1000;
+E_kWh_drive_3ph_mot=sum((Torque>0).*(P_mot_out+P_model_loss_motor))*delta_T/3600/1000;
+n_drive_mot=E_kWh_drive_3ph_mot/(E_kWh_drive_3ph_mot+E_kWh_drive_losses_mot);
+
+%Combined motor and drive motoring efficiency
+n_motor_and_drive_mot=n_motor_mot*n_drive_mot;
+
+%Generating Case%
+%*************************************************************************%
+%Motor losses and efficiency while generating
+E_kWh_motor_losses_gen=sum((Torque<0).*P_model_loss_motor)*delta_T/3600/1000;
+E_kWh_motor_mech_gen=sum((Torque<0).*P_mot_out)*delta_T/3600/1000;
+n_motor_gen=(E_kWh_motor_mech_gen+E_kWh_motor_losses_gen)/(E_kWh_motor_mech_gen);
+
+%Drive losses and efficiency while generating
+E_kWh_drive_losses_gen=sum((Torque<0).*P_model_loss_drive)*delta_T/3600/1000;
+E_kWh_drive_3ph_gen=sum((Torque<0).*(P_mot_out+P_model_loss_motor))*delta_T/3600/1000;
+n_drive_gen=(E_kWh_drive_3ph_gen+E_kWh_drive_losses_gen)/(E_kWh_drive_3ph_gen);
+
+%Motor Drive Generating DC Output Energy
+E_kWh_drive_dc_gen=sum((Torque<0).*(P_mot_out+P_model_loss_motor+P_model_loss_drive))*delta_T/3600/1000;
+E_kWh_batt_gen_losses=sum((Torque<0).*(P_batt_losses))*delta_T/3600/1000;
+
+%Combined motor and drive generating efficiency
+n_motor_and_drive_gen=n_motor_gen*n_drive_gen;
+
+%Combined motor and drive efficiency - motoring and generating
+n_motor_and_drive=(E_kWh_motor_mech_mot-(E_kWh_drive_3ph_gen+E_kWh_drive_losses_gen))/(E_kWh_motor_mech_mot+E_kWh_motor_losses_mot+E_kWh_drive_losses_mot-E_kWh_motor_mech_gen);
+
+%Wh/mile losses
+wh_mile_motor_and_drive_losses=(E_kWh_motor_losses_mot+E_kWh_drive_losses_mot+E_kWh_motor_losses_gen+E_kWh_drive_losses_gen)/Trip_length_miles*1000;
+
+
