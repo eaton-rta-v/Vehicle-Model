@@ -1,1 +1,182 @@
 
+for i=1:length(P_UC_out)
+  %Calculate Ultracap and voltage watt-hours
+    if i>1
+        Wh_UC(i)=P_UC_out(i)/3600*delta_T+Wh_UC(i-1);
+    else
+        Wh_UC(i)=P_UC_out(i)/3600*delta_T;
+    end
+end
+
+%Calculate hybridization ratio (ratio of of ultracap power to hybrid ESS
+%power)
+Hybridization_opt=P_UC_out'./P_batt_only_out;
+
+%Calculate Amp-hours
+Ah_hyb_batt=cumtrapz(I_hyb_batt)*delta_T/3600;
+
+%Hybrid battery current and losses
+P_hyb_batt_int=V_batt.*I_hyb_batt';
+  
+%UC current and losses
+if power_split_method==3
+    P_UC_losses=(I_UC).^2.*((I_UC>0).*R_UC_discharge + (I_UC<0).*R_UC_charge);
+    P_DCDC_losses=(P_UC_out>0).*P_UC_out.*(1-n_DCDC)-(P_UC_out<0).*P_UC_out.*(1-n_DCDC)./n_DCDC;
+    P_hyb_batt_losses=(I_hyb_batt').^2.*R_batt;
+else
+    P_UC_losses=P_uc_loss_temp;
+    P_DCDC_losses=Pdc_loss_temp;
+    P_hyb_batt_losses=Pb_loss_temp;
+end
+
+%Calculate total HESS power
+P_HESS=P_UC_out+P_dcdc_out;
+%Ensure power beyond P_batt_no_limit_power is not counted, this extra power
+%would be for charging the ultracapacitor
+P_HESS_motoring=(P_HESS>0).*(P_HESS<P_batt_out_no_limit').*P_HESS+(P_HESS>0).*(P_HESS>=P_batt_out_no_limit').*P_batt_out_no_limit';
+%Ensure power beyond P_batt_no_limit_power is not counted, prevents case
+%where battery is absorbing ultracapacitor power and not regen power from
+%being counted as regen power
+P_HESS_regen=(P_HESS<0).*(P_HESS>P_batt_out_no_limit').*P_HESS+(P_HESS<0).*(P_HESS<=P_batt_out_no_limit').*P_batt_out_no_limit';
+
+
+
+%Calculate hybrid battery pack energy parameters in watt-hours
+E_hyb_batt_losses      = sum(P_hyb_batt_losses)   * delta_T/3600;
+E_hyb_batt_out         = sum(P_hyb_batt_out)      * delta_T/3600;
+E_hyb_batt_throughput  = sum(abs(P_hyb_batt_out)) * delta_T/3600;
+E_UC_discharge     = sum((P_UC_out>0).*(P_UC_out))*delta_T/3600;
+E_HESS_motoring    = sum(P_HESS_motoring)*delta_T/3600;
+E_HESS_regen       = sum(P_HESS_regen)*delta_T/3600;
+E_motoring_command = sum((P_batt_out_no_limit>0).*P_batt_out_no_limit)*delta_T/3600;
+E_regen_command    = sum((P_batt_out_no_limit<0).*P_batt_out_no_limit)*delta_T/3600;
+E_UC_losses            = sum(P_UC_losses)         * delta_T/3600;
+E_hyb_batt_int         = sum(P_hyb_batt_int)      * delta_T/3600;
+E_dcdc_losses          = sum(P_DCDC_losses)       * delta_T/3600;
+E_drive_losses         = sum(P_model_loss_drive)  * delta_T/3600;
+Ah_hyb_batt_discharge  = sum((I_hyb_batt>0).*(I_hyb_batt))* delta_T/3600;
+Ah_hyb_batt_charge     = sum((I_hyb_batt<0).*(I_hyb_batt))* delta_T/3600;
+Ah_batt_only_discharge = sum((I_batt>0).*(I_batt))* delta_T/3600;
+Ah_batt_only_charge    = sum((I_batt<0).*(I_batt))* delta_T/3600;
+Ah_UC_discharge        = sum((I_UC>0).*I_UC)      * delta_T/3600;
+Ah_UC_charge           = sum((I_UC<0).*I_UC)      * delta_T/3600;
+UC_amp_hours           = Farads_UC_Datasheet*2.7/3600; %Q=CV 
+UC_cycles              = Ah_UC_discharge/UC_amp_hours; 
+
+%Calculate hybrid battery efficiency
+%Not correct way to define efficiency??
+n_hyb_batt=(E_hyb_batt_throughput)/(E_hyb_batt_throughput+E_hyb_batt_losses);
+
+%Calculate wh per mile
+wh_mile_UC_discharge=E_UC_discharge/Trip_length_miles;
+wh_mile_hyb_batt_out=E_hyb_batt_out/Trip_length_miles;
+wh_mile_hyb_batt_internal=E_hyb_batt_int/Trip_length_miles;
+wh_mile_hyb_batt_throughput=E_hyb_batt_throughput/Trip_length_miles;
+wh_mile_hyb_batt_losses=E_hyb_batt_losses/Trip_length_miles;
+wh_mile_uc_losses=E_UC_losses/Trip_length_miles;
+wh_mile_dcdc_losses=E_dcdc_losses/Trip_length_miles;
+wh_mile_hybridstorage_losses=(E_hyb_batt_losses+E_UC_losses+E_dcdc_losses)/Trip_length_miles;
+wh_km_hyb_batt_internal=wh_mile_hyb_batt_internal*0.6214;
+ESS_Efficiency=100*(wh_mile_batt_only_out/(wh_mile_batt_only_out+wh_mile_hybridstorage_losses));
+wh_mile_HESS_motoring = E_HESS_motoring/Trip_length_miles;
+wh_mile_HESS_regen = E_HESS_regen/Trip_length_miles;
+wh_mile_motoring_command=E_motoring_command/Trip_length_miles;
+wh_mile_regen_command=E_regen_command/Trip_length_miles;
+wh_mile_drive_losses = E_drive_losses/Trip_length_miles;
+
+%Calculate kWh to travel 50 miles and 100 miles
+E_batt_50_miles=wh_mile_hyb_batt_internal*50/1000;
+E_batt_100_miles=wh_mile_hyb_batt_internal*100/1000;
+
+
+%*************************************************************************%
+% Data Summary Text Array
+% Create a summary of results for each run of the simulation
+
+% Define array of parameters
+SimSummary_one_drive=cell(3,1);row=1;
+SimSummary_one_drive(row)={''};row=row+1;
+SimSummary_one_drive(row)={num2str(Trip_length_miles,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(wh_mile_hyb_batt_out+wh_mile_hybridstorage_losses,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(wh_mile_batt_only_throughput)};row=row+1;
+SimSummary_one_drive(row)={num2str(wh_mile_hyb_batt_throughput)};row=row+1;
+SimSummary_one_drive(row)={num2str(wh_mile_batt_only_internal)};row=row+1;
+SimSummary_one_drive(row)={num2str(wh_mile_batt_only_out,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(wh_mile_hyb_batt_out,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(ESS_Efficiency,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(wh_mile_batt_only_losses,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(wh_mile_hybridstorage_losses,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(wh_mile_hyb_batt_losses,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(wh_mile_uc_losses,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(wh_mile_dcdc_losses,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(sum(I_batt_only_out)/3600,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(sum(I_hyb_batt)/3600,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(100*((Ah_batt_only_discharge+Ah_batt_only_charge)-(Ah_hyb_batt_discharge+Ah_hyb_batt_charge))/(Ah_batt_only_discharge+Ah_batt_only_charge),4)};row=row+1;
+SimSummary_one_drive(row)={num2str(Ah_batt_only_discharge,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(Ah_hyb_batt_discharge,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(100*((Ah_batt_only_discharge)-(Ah_hyb_batt_discharge))/(Ah_batt_only_discharge),4)};row=row+1;
+SimSummary_one_drive(row)={num2str(Ah_batt_only_charge,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(Ah_hyb_batt_charge,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(100*((Ah_batt_only_charge)-(Ah_hyb_batt_charge))/(Ah_batt_only_charge),4)};row=row+1;
+SimSummary_one_drive(row)={num2str(UC_cycles,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(wh_mile_motoring_command,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(wh_mile_batt_only_motoring,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(wh_mile_HESS_motoring,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(wh_mile_UC_discharge,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(wh_mile_regen_command,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(wh_mile_batt_only_regen,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(wh_mile_HESS_regen,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(rms(I_batt_only_out),4)};row=row+1;
+SimSummary_one_drive(row)={num2str(rms(I_hyb_batt),4)};row=row+1;
+SimSummary_one_drive(row)={num2str(rms(I_UC),4)};row=row+1;
+SimSummary_one_drive(row)={num2str(length(I_batt_only_out)*delta_T,4)};row=row+1;
+SimSummary_one_drive(row)={num2str(wh_mile_drive_losses)};row=row+1;
+
+%to add: battery and ultracapacitor throughput
+
+if j==1
+    %initialize array
+    SimSummary={'Drive Summary','',''};row=2;
+    SimSummary(size(SimSummary,1)+1,:)={'Trip Distance =',SimSummary_one_drive{row},'Miles'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'ESS Internal Energy Consumption =',SimSummary_one_drive{row},'Wh/mile'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Battery Only Throughput Energy =',SimSummary_one_drive{row},'Wh/mile'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Hybrid Battery Throughput Energy =',SimSummary_one_drive{row},'Wh/mile'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Battery Only Int Energy Consumption=',SimSummary_one_drive{row},'Wh/mile'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Battery Only Motor Drive & Acc Input Energy =',SimSummary_one_drive{row},'Wh/mile'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Hybrid ESS Motor Drive & Acc Input Energy =',SimSummary_one_drive{row},'Wh/mile'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'ESS Efficiency =',SimSummary_one_drive{row},'%'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Battery Only Losses =',SimSummary_one_drive{row},'Wh/mile'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Hybrid ESS Losses =',SimSummary_one_drive{row},'Wh/mile'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Hybrid Battery Losses =',SimSummary_one_drive{row},'Wh/mile'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Ultracap Losses =',SimSummary_one_drive{row},'Wh/mile'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'DCDC Losses =',SimSummary_one_drive{row},'Wh/mile'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Ah Batt Only =',SimSummary_one_drive{row},'Ah'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Ah Hyb Batt =',SimSummary_one_drive{row},'Ah'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Reduction in Ah Consumed =',SimSummary_one_drive{row},'%'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Ah Discharge Batt Only =',SimSummary_one_drive{row},'Ah'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Ah Discharge Hyb Batt =',SimSummary_one_drive{row},'Ah'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Reduction in Ah Discharged =',SimSummary_one_drive{row},'%'};row=row+1; 
+    SimSummary(size(SimSummary,1)+1,:)={'Ah Charge Batt Only =',SimSummary_one_drive{row},'Ah'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Ah Charge Hyb Batt =',SimSummary_one_drive{row},'Ah'};row=row+1;     
+    SimSummary(size(SimSummary,1)+1,:)={'Reduction in Ah Charged =',SimSummary_one_drive{row},'%'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Ultrapacitor Cycles =',SimSummary_one_drive{row},'Cycles'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Commanded Motoring Energy=',SimSummary_one_drive{row},'Wh/mi'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Battery Only Motoring Energy=',SimSummary_one_drive{row},'Wh/mi'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'HESS Motoring Energy=',SimSummary_one_drive{row},'Wh/mi'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Ultracapacitor Discharge Energy=',SimSummary_one_drive{row},'Wh/mi'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Commanded Regen Energy=',SimSummary_one_drive{row},'Wh/mi'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Battery Only Regen Energy=',SimSummary_one_drive{row},'Wh/mi'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'HESS Regen Energy=',SimSummary_one_drive{row},'Wh/mi'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Battery Only Battery Current RMS=',SimSummary_one_drive{row},'Arms'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'HESS Battery Current RMS=',SimSummary_one_drive{row},'Arms'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Ultracapacitor Current RMS=',SimSummary_one_drive{row},'Arms'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Drive length time=',SimSummary_one_drive{row},'Seconds'};row=row+1;
+    SimSummary(size(SimSummary,1)+1,:)={'Inverter Loss=',SimSummary_one_drive{row},'Wh/mi'};row=row+1;
+else
+    %insert data into array
+    SimSummary=[SimSummary(:,1:j) SimSummary_one_drive SimSummary(:,j+1:end)];
+end
+
+%Save SimSummary in numeric array;
+stringarray=SimSummary(:,j+1);
+SimSummary_numeric(:,j)=str2double(char(stringarray));
