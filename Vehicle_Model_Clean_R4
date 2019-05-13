@@ -1,1 +1,317 @@
 
+
+%*************************************************************************%
+%Calculate Power and Energy to Drive for Battery Only Vehicle
+addpath Drive_Cycles; addpath Matlab_Scripts; addpath DPM_Files
+clear all; close all;
+
+for j=1:4
+    for m=1:1
+    clearvars -except results2 j m SimSummary SimSummary_numeric...
+        Ultracapacitor_Type Battery_Type drive_cycle Ah_limit results... 
+        gear_selection_option V_batt_min HESS_Calc_Enable...
+        Energy_Storage_System HESS_Calc_Enable R_UC_Datasheet... 
+        Farads_UC_Datasheet Vehicle power_split_method V_UC_nom V_uc_max...
+        V_uc_min a_mph_s_UC_thresh UCnom_range n_DCDC UC_ch_dis_rate...
+        UC_amp_hours   V_mph_half_UC_ch Custom_Power_Profile P_custom ...
+        Drive_cycle_start_time P_lim Ah_starting_point fixed_values ...
+        R_batt_Rule P_HESS_min_power Scale_R_batt Idcdc_lim m_trailer
+    
+    switch j
+        case 1
+            drive_cycle='US06';
+            Vehicle='E28 Camaro';
+            Battery_Type = 'LG_HG2_25degC';
+            Ah_limit=0.9*3*12;
+            Ultracapacitor_Type=1; %5: 25degC, 6: 10degC, 7: 0degC, 8: -10degC, 9:-20degC,  %Maxwell650F: 0degC = 2, 25degC = 1;Maxwell48V_0degC =3
+            Idcdc_lim = 400; %DCDC current limit, set to 300A for battery pack
+            HESS_Calc_Enable = 1; %0 battery only, 1 enable HESS Calc
+            Farads_UC_Datasheet = 3300; %Farads
+            R_UC_Datasheet = 2.9*0.29; %mOhms
+            gear_selection_option = 'minimum_loss_gear';
+            Inverter_Type = 'IGBT_600V';
+            
+         case 2
+            drive_cycle='UDDS';
+            Vehicle='E28 Camaro';
+            Battery_Type = 'LG_HG2_25degC';
+            Ah_limit=0.9*3*12;
+            Ultracapacitor_Type=1; %5: 25degC, 6: 10degC, 7: 0degC, 8: -10degC, 9:-20degC,  %Maxwell650F: 0degC = 2, 25degC = 1;Maxwell48V_0degC =3
+            Idcdc_lim = 400; %DCDC current limit, set to 300A for battery pack
+            HESS_Calc_Enable = 1; %0 battery only, 1 enable HESS Calc
+            Farads_UC_Datasheet = 3300; %Farads
+            R_UC_Datasheet = 2.9*0.29; %mOhms
+            gear_selection_option = 'minimum_loss_gear';
+            Inverter_Type = 'IGBT_600V';
+        
+        case 3
+            drive_cycle='LA92';
+            Vehicle='E28 Camaro';
+            Battery_Type = 'LG_HG2_25degC';
+            Ah_limit=0.9*3*12;
+            Ultracapacitor_Type=1; %5: 25degC, 6: 10degC, 7: 0degC, 8: -10degC, 9:-20degC,  %Maxwell650F: 0degC = 2, 25degC = 1;Maxwell48V_0degC =3
+            Idcdc_lim = 400; %DCDC current limit, set to 300A for battery pack
+            HESS_Calc_Enable = 1; %0 battery only, 1 enable HESS Calc
+            Farads_UC_Datasheet = 3300; %Farads
+            R_UC_Datasheet = 2.9*0.29; %mOhms
+            gear_selection_option = 'minimum_loss_gear';
+            Inverter_Type = 'IGBT_600V';
+         
+        case 4
+            drive_cycle='HWFET';
+            Vehicle='E28 Camaro';
+            Battery_Type = 'LG_HG2_25degC';
+            Ah_limit=0.9*3*12;
+            Ultracapacitor_Type=1; %5: 25degC, 6: 10degC, 7: 0degC, 8: -10degC, 9:-20degC,  %Maxwell650F: 0degC = 2, 25degC = 1;Maxwell48V_0degC =3
+            Idcdc_lim = 400; %DCDC current limit, set to 300A for battery pack
+            HESS_Calc_Enable = 1; %0 battery only, 1 enable HESS Calc
+            Farads_UC_Datasheet = 3300; %Farads
+            R_UC_Datasheet = 2.9*0.29; %mOhms
+            gear_selection_option = 'minimum_loss_gear';
+            Inverter_Type = 'IGBT_600V';
+    end             
+    
+%Declare Vehicle Paremeters
+Declare_Extra_Parameters %extra parameters for special settings and rule based control, not normally utilized
+Declare_Vehicle_Params
+
+%Ultracapacitor cell datasheet capacitance and mOhm resistance value - for 
+%scaling C versus OCV from 650F data
+
+%Declare Drive Cycle
+switch drive_cycle 
+    case 'EUDC' 
+        load EUDC.mat;
+    case 'HWFET'
+        load HWFET.mat;
+    case 'US06'
+        load US06_smoothed.mat; %manually smoothed accel, kept within 2mph
+    case 'LA92'
+        load LA92.mat;
+    case 'UDDS'
+        load UDDS.mat;
+    case 'Manhattan'
+        load 'Manhattan.mat';
+    case 'HDUDDS'
+        load HDUDDS.mat;
+    case 'Orange'
+        load Orange.mat;
+    case 'NYCC_Bus'
+        load NYCC_Bus.mat;
+    case 'Circ_of_Americas'
+        load Circ_of_Americas.mat;
+    case 'Road_America'
+        load Road_America.mat;
+    case 'Ecocar_Emiss_Energy_Cycle'
+        load Ecocar_Emiss_Energy_Cycle.mat
+end
+
+%Append many drive cycles and then determine driveable distance and remove
+%unused points
+% V_mph=[V_mph;V_mph;V_mph;V_mph;V_mph;V_mph;V_mph;V_mph;V_mph;V_mph;V_mph;V_mph;V_mph;V_mph;V_mph;V_mph;V_mph;V_mph;V_mph;V_mph;V_mph];
+
+%Adjust for different starting times within drivecycle
+% V_mph=V_mph(Drive_cycle_start_time:length(V_mph));
+
+%Calculate speed, torque, and power values
+Speed_Torque_Power_Calcs
+
+%*************************************************************************%
+% Hybrid Energy Storage Calculations
+
+if HESS_Calc_Enable==1
+
+%Calculate motor and drive loss from drivetrain model
+Motor_and_Drive_Loss_Calcs
+
+%Calculate trip length
+Trip_length_miles;
+
+%Declare_Battery_Pack_Parameters;
+Declare_Battery_Pack_Params_R1; Butler_Volmer=true;
+
+%Look up battery resistance and OCV (V_batt) as a function of Ah_batt
+%calculated in Motor_and_Drive_loss_Calcs, use for input to DP solution
+R_batt_ch=interp1(Ah_table,R_batt_ch_table,Ah_batt,'spline','extrap');
+R_batt_dis=interp1(Ah_table,R_batt_dis_table,Ah_batt,'spline','extrap');
+V_batt=interp1(Ah_table,V_ocv_table,Ah_batt,'spline','extrap');
+
+tic
+
+%Calculate optimal powersplit for HESS
+HESS_Powersplit_Calc_R9
+
+toc
+tic
+
+%*************************************************************************%
+%Important - recalculate power split with updated battery parameters,
+%allows accurate calculation of powersplit without battery SOC as a state
+
+for k=1:length(Ah_batt)
+    if k==1
+        Ah_hyb_batt(k)=0;
+    else
+        Ah_hyb_batt(k)=Ah_hyb_batt(k-1)+I_hyb_batt(k-1)*delta_T/3600;
+    end
+end
+    Ah_hyb_batt(end)
+    Ah_hyb_batt=Ah_hyb_batt';
+
+    %Recalculate power split calcs with updated resistance
+    R_batt_ch=interp1(Ah_table,R_batt_ch_table,Ah_hyb_batt,'spline','extrap');
+    R_batt_dis=interp1(Ah_table,R_batt_dis_table,Ah_hyb_batt,'spline','extrap');
+    V_batt=interp1(Ah_table,V_ocv_table,Ah_hyb_batt,'spline','extrap');
+    HESS_Powersplit_Calc_R9
+toc
+%*************************************************************************%
+
+
+%Powersplit performance analysis
+Powersplit_Calcs
+open SimSummary
+
+Ah_hyb_batt(end)
+else
+    %Add specific battery only simsummary calcs
+    Motor_and_Drive_Loss_Calcs
+    
+    %Calculate trip length
+    Trip_length_miles
+
+    %Results summary
+    if j==1
+        results=[max(Ah_batt) Trip_length_miles wh_mile_batt_only_losses wh_mile_batt_only_out  E_kWh_motor_mech_mot/Trip_length_miles*1000 E_kWh_motor_mech_gen/Trip_length_miles*1000]
+    else
+        results(j,:)=[max(Ah_batt) Trip_length_miles wh_mile_batt_only_losses wh_mile_batt_only_out  E_kWh_motor_mech_mot/Trip_length_miles*1000 E_kWh_motor_mech_gen/Trip_length_miles*1000]
+    end
+end
+    end
+end
+
+% open SimSummary_numeric
+
+%HybridEnergyStorage_plots_postR6
+
+%Plots
+% figure
+% plot(res.Pbatt/1000)
+% hold on
+% plot(res.Puc/1000,'r')
+% hold on
+% plot(res.Ptot/1000,'k')
+% legend('Battery power','Ultracap power','Total power')
+% grid on
+% 
+% figure
+% subplot(3,1,1)
+% plot(V_uc)
+% ylabel('UC Voltage(V)')
+% grid on
+% subplot(3,1,2)
+% plot(I_UC)
+% ylim([-400 400])
+% ylabel('UC Current(A)')
+% grid on
+% subplot(3,1,3)
+% plot(P_UC_out/1000)
+% ylabel('UC Power(kW)')
+% xlabel('Time(s)')
+% grid on
+% 
+% figure
+% subplot(2,1,1)
+% plot(V_hyb_batt_out)
+% % hold on
+% % plot(res.Vbatt_out,'r')
+% %legend('Battery Only','HESS')
+% % hold on
+% % plot(V_batt,'k')
+% grid on
+% ylabel('Battery Voltage(V)')
+% subplot(2,1,2)
+% %plot(I_batt)
+% % hold on
+% plot(I_hyb_batt,'r')
+% ylabel('Battery Current(A)')
+% xlabel('Time(s)')
+% grid on
+% 
+% % figure
+% % subplot(2,1,1)
+% % plot(V_mph)
+% % hold on
+% % ylabel('Speed(MPH)')
+% % hold on
+% % subplot(2,1,2)
+% % plot(res.Ptot/1000,'r')
+% % hold on
+% % plot(P_batt_only_out/1000)
+% % ylabel('Power(kW)')
+% % xlabel('Time(s)')
+% % grid on
+% 
+% 
+% 
+% beep;pause(0.1);beep;pause(0.1);beep;pause(0.1);beep;pause(0.2);beep;
+% toc
+% 
+% figure
+% plot(Ah_batt)
+% hold on
+% plot(Ah_hyb_batt,'r')
+% legend('Battery Only','HESS')
+% ylabel('Battery amp-hours (Ah)')
+% xlabel('Time(s)')
+% grid on
+% 
+% % figure
+% % subplot(2,1,1)
+% % plot(P_hyb_batt_out/1000)
+% % hold on
+% % ylabel('Battery Power(kW)')
+% % ylim([-60 60])
+% % grid on
+% % subplot(2,1,2)
+% % plot(res.Puc/1000,'r')
+% % ylim([-60 60])
+% % ylabel('UC Power(kW)')
+% % xlabel('Time(s)')
+% % grid on
+% 
+% %Plot speed and battery and HESS power
+% figure
+% subplot(2,1,1)
+% plot(V_mph/0.621)
+% hold on
+% ylabel('Speed(km/h)')
+% grid on
+% subplot(2,1,2)
+% plot(res.Ptot/1000,'r')
+% hold on
+% plot(P_batt_only_out/1000)
+% ylabel('System Power(kW)')
+% xlabel('Time(s)')
+% grid on
+% legend('HESS','Battery Only')
+% 
+% %Plot UC Voltage & Current
+% figure
+% subplot(2,1,1) 
+% plot(V_uc_out)
+% hold on
+% plot(res.Vbatt_out,'r')
+% ylabel('Voltage(V)')
+% grid on
+% legend('UC','Battery')
+% subplot(2,1,2)
+% %plot(I_UC+res.Pdcdc./res.V_uc,'k')
+% %hold on
+% plot(res.Pdcdc./res.V_uc,'r')
+% hold on
+% plot(I_UC)
+% legend('Battery (HS)','UC')
+% ylim([-200 200])
+% ylabel('Current(A)')
+% xlabel('Time(s)')
+% grid on
