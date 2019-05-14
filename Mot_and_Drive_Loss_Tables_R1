@@ -189,6 +189,6 @@ switch Inverter_Type
         Drive_semiconductor_loss_data = 0.0060*(x).^2 + 8.6460.*(x) + 20.0266;
         
         case 'IGBT_600V'
-        x=Motor_phase_current_table;
+        x=(Motor_phase_current_table)/2;
         Drive_semiconductor_loss_data = 0.0175*(x).^2 + 10.8240.*(x) +24.6761;
 end
